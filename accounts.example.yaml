@@ -1,0 +1,41 @@
+# StarRailCopilot-AccountSwitch 账号配置模板（脱敏）
+# ------------------------------------------------------------
+# 真实手机号 / UID 不要提交到 GitHub。本文件只含占位符。
+#
+# 使用：复制为 accounts.yaml 后填写真实值（accounts.yaml 已被 .gitignore 排除）：
+#     cp accounts.example.yaml accounts.yaml
+#     python3 init.py
+# init.py 会自动：逐个启动游戏识别 UID 并回填 accounts.yaml、
+# 按唯一手机号前缀智能补后缀、生成 systemd service/timer、安装依赖。
+
+# 全局设置（本机相关，按需修改）
+global:
+  # StarRailCopilot 源码目录（用户填自己本机的路径）
+  src_dir: /home/user/Desktop/StarRailCopilot
+  # src 的 venv python，相对 src_dir 或绝对路径
+  venv_python: .venv/bin/python
+  # 目标安卓设备 ADB serial（设备端需开启无线 ADB）
+  adb_serial: "192.168.1.110:16132"
+  # adb 可执行文件（留空用 PATH 中的 adb）
+  adb: adb
+  # src 日志目录（相对 src_dir）
+  log_dir: log
+  # 游戏包名
+  package: com.miHoYo.hkrpg
+  # 轮换参数
+  poll_sec: 60
+  stale_sec: 300
+  timeout_sec: 7200
+
+# 账号列表：任意数量，顺序即轮换顺序（每天跑一轮，每账号一次）
+accounts:
+  - name: main            # 账号标识（switch/current 用这个名字）
+    phone_prefix: "1xx"   # 手机号前 3 位（占位；实际填前 3 位）
+    phone_suffix: ""      # 手机号后 2 位（init 按唯一前缀智能补，或手动填）
+    uid: ""               # 游戏内 UID（init 自动识别填充，也可手动填）
+    src_profile: main     # src 使用的配置档案（src 的 config/<profile>）
+  - name: alt
+    phone_prefix: "1yy"
+    phone_suffix: ""
+    uid: ""
+    src_profile: alt

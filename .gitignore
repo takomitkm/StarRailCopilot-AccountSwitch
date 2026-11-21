@@ -1,0 +1,12 @@
+# 本地真实账号配置（含手机号/UID），绝不提交
+accounts.yaml
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# 日志
+*.log
+log/
