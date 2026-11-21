@@ -120,7 +120,7 @@ def run_and_monitor(cfg: dict, name: str, profile: str) -> str:
 
     force_stop(serial, pkg)
     # 记录启动前已有日志文件，只读启动后新建文件，避免读到旧的失败标记
-    baseline = {p.resolve() for p in log_dir.glob(f"*_{name}.txt")}
+    baseline = {p.resolve() for p in log_dir.glob(f"*_{profile}.txt")}
     script = f"{profile}.py"
     cmd = [str(venv_py), script]
     log(f"start {name} ({script}): {' '.join(cmd)}")
@@ -135,7 +135,7 @@ def run_and_monitor(cfg: dict, name: str, profile: str) -> str:
                 reason = f"process_exit_{proc.returncode}"
                 log(f"{name} process exited rc={proc.returncode}")
                 break
-            lf = latest_log(log_dir, name)
+            lf = latest_log(log_dir, profile)
             if lf is not None and lf.resolve() not in baseline:
                 now_m = lf.stat().st_mtime
                 if now_m > last_seen:
