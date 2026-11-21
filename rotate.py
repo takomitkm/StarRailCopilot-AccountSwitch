@@ -122,8 +122,9 @@ def run_and_monitor(cfg: dict, name: str, profile: str) -> str:
     timeout = int(g.get("timeout_sec") or TIMEOUT_SEC)
 
     force_stop(serial, pkg)
-    # 记录启动前已有日志文件，只读启动后新建文件，避免读到旧的失败标记
-    baseline = {p.resolve() for p in log_dir.glob(f"*_{profile}.txt")}
+    # 记录启动前已有日志文件及其 mtime；接受启动后新建文件，也接受已有文件被继续写入
+    # （src.py 通常写当天同名文件而非每次新建，按 mtime 前进才能正确判定 stale/end）
+    baseline = {p.resolve(): p.stat().st_mtime for p in log_dir.glob(f"*_{profile}.txt")}
     script = f"{profile}.py"
     cmd = [str(venv_py), script]
     log(f"start {name} ({script}): {' '.join(cmd)}")
@@ -139,20 +140,22 @@ def run_and_monitor(cfg: dict, name: str, profile: str) -> str:
                 log(f"{name} process exited rc={proc.returncode}")
                 break
             lf = latest_log(log_dir, profile)
-            if lf is not None and lf.resolve() not in baseline:
-                now_m = lf.stat().st_mtime
-                if now_m > last_seen:
-                    last_seen = now_m
-                try:
-                    tail = lf.read_bytes().decode("utf-8", "replace")[-8000:]
-                except OSError as exc:  # noqa: BLE001
-                    log(f"read log tail error: {exc}")
-                    continue
-                hit = [m for m in END_MARKERS if m in tail]
-                if hit:
-                    reason = "end_marker:" + "|".join(hit)
-                    log(f"{name} end marker: {reason}")
-                    break
+            if lf is not None:
+                lp = lf.resolve()
+                if lp not in baseline or lf.stat().st_mtime > baseline[lp]:
+                    now_m = lf.stat().st_mtime
+                    if now_m > last_seen:
+                        last_seen = now_m
+                    try:
+                        tail = lf.read_bytes().decode("utf-8", "replace")[-8000:]
+                    except OSError as exc:  # noqa: BLE001
+                        log(f"read log tail error: {exc}")
+                        continue
+                    hit = [m for m in END_MARKERS if m in tail]
+                    if hit:
+                        reason = "end_marker:" + "|".join(hit)
+                        log(f"{name} end marker: {reason}")
+                        break
             if time.time() - last_seen > stale:
                 reason = "stale_no_update"
                 log(f"{name} log stale (no update {stale}s)")
