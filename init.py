@@ -122,11 +122,12 @@ def smart_fill(accounts: list[dict]) -> bool:
     return changed
 
 
-def write_systemd(account_count: int) -> Path:
+def write_systemd(account_count: int, cfg: dict) -> Path:
     unit_dir = Path.home() / ".config" / "systemd" / "user"
     unit_dir.mkdir(parents=True, exist_ok=True)
     rotate = BASE / "rotate.py"
     py = sys.executable
+    timer_time = str((cfg.get("global") or {}).get("timer_time") or "04:00")
     service = f"""\
 [Unit]
 Description=StarRailCopilot account rotation (daily, {account_count} accounts)
@@ -142,12 +143,12 @@ Environment=PYTHONUNBUFFERED=1
 [Install]
 WantedBy=default.target
 """
-    timer = """\
+    timer = f"""\
 [Unit]
 Description=StarRailCopilot rotation timer
 
 [Timer]
-OnCalendar=*-*-* 04:00:00
+OnCalendar=*-*-* {timer_time}:00
 Persistent=false
 RandomizedDelaySec=0
 
@@ -190,7 +191,7 @@ def main() -> int:
             save_yaml(CFG, cfg)
             print(f"[init] saved {CFG}")
 
-    write_systemd(len(accounts))
+    write_systemd(len(accounts), cfg)
     if not args.no_enable:
         enable_timer()
 

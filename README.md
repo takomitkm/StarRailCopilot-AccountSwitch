@@ -79,6 +79,7 @@ python3 rotate.py
 | `log_dir` | src 日志目录（相对 `src_dir`） |
 | `package` | 游戏包名（默认 `com.miHoYo.hkrpg`） |
 | `poll_sec` / `stale_sec` / `timeout_sec` | 轮询/无更新判定/单账号超时（秒） |
+| `timer_time` | 每日轮换触发时间 `HH:MM`（写入 systemd `OnCalendar`；默认 `04:00`） |
 
 `accounts[]`（任意数量，顺序即轮换顺序）：
 
@@ -97,8 +98,10 @@ python3 rotate.py
    监控日志（`Request human takeover` / `Close game during wait` 标记、无更新、进程退出）→ 杀进程。
 3. 每账号结束 `switch` 到下一账号；全部跑完退出（timer 次日再触发）。
 
-systemd（user）由 `init.py` 生成：`starrail-rotate.timer` 每天 `04:00` 触发
-`starrail-rotate.service`（oneshot，`TimeoutStartSec=240min`）。
+systemd（user）由 `init.py` 生成：`starrail-rotate.timer` 每天触发
+`starrail-rotate.service`（oneshot，`TimeoutStartSec=240min`）。触发时间取
+`accounts.yaml` 的 `global.timer_time`（`HH:MM`，默认 `04:00`），改配置后重跑 `init.py` 或
+`systemctl --user edit starrail-rotate.timer` 更新。
 
 ## 免责
 

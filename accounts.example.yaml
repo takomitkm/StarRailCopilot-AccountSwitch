@@ -26,6 +26,8 @@ global:
   poll_sec: 60
   stale_sec: 300
   timeout_sec: 7200
+  # 每日轮换触发时间（HH:MM，24 小时制；写入 systemd timer 的 OnCalendar）
+  timer_time: "04:00"
 
 # 账号列表：任意数量，顺序即轮换顺序（每天跑一轮，每账号一次）
 accounts:
