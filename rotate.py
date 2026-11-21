@@ -110,7 +110,10 @@ def run_and_monitor(cfg: dict, name: str, profile: str) -> str:
     """关 app -> 启动 src 档案进程 -> 监控日志到结束 -> 杀进程。返回结束原因。"""
     g = cfg.get("global") or {}
     src_dir = Path(g.get("src_dir") or "/home/user/Desktop/StarRailCopilot")
-    venv_py = (src_dir / (g.get("venv_python") or ".venv/bin/python")).resolve()
+    vp = g.get("venv_python") or ".venv/bin/python"
+    # 保留 venv 解释器 symlink（.venv/bin/python -> uv base python）；.resolve() 会解掉
+    # symlink 落到 venv 基座，导致脚本跑在非 venv 环境而缺依赖启动崩溃。
+    venv_py = Path(vp) if Path(vp).is_absolute() else src_dir / vp
     log_dir = src_dir / (g.get("log_dir") or "log")
     serial = str(g.get("adb_serial") or "192.168.1.110:16132")
     pkg = str(g.get("package") or "com.miHoYo.hkrpg")
