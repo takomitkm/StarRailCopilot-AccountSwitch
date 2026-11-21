@@ -274,6 +274,51 @@ def uid_of(img: Image.Image) -> str | None:
     return m.group(1) if m else None
 
 
+def wait_known_state(timeout: float = 300, *, interval: float = 2.0
+                     ) -> tuple[str, Image.Image, str | None]:
+    """Wait until the screen reaches a state we can read identity from.
+
+    A freshly launched app shows splash / loading frames for a while, and every
+    detector returns False there. Reading once immediately after launch is what
+    made `current` report an unknown account on an already closed game.
+
+    Returns (state, frame, uid) — `uid` is the value already read when the state
+    is "ingame", so callers never have to re-OCR the same frame.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        img = capture()
+        uid = uid_of(img)
+        if uid:
+            return "ingame", img, uid
+        if is_title(img):
+            return "title", img, None
+        if is_modal(img):
+            return "modal", img, None
+        if is_confirm(img):
+            return "confirm", img, None
+        if is_launcher(img):
+            return "launcher", img, None
+        time.sleep(interval)
+    raise HsrError("timeout_waiting_known_state")
+
+
+def match_account(accounts: dict[str, str | None], *, uid: str | None = None,
+                  selected: str | None = None) -> tuple[str | None, str]:
+    """Map a read UID or masked row to an account, reporting which one matched."""
+    if uid:
+        for masked, account_uid in accounts.items():
+            if account_uid and uid == account_uid:
+                return masked, "uid"
+        return None, "uid_unknown"
+    if selected:
+        for masked in accounts:
+            if account_matches(masked, selected):
+                return masked, "selected"
+        return None, "selected_unknown"
+    return None, "none"
+
+
 def launch() -> None:
     adb("shell", "am", "force-stop", PKG)
     time.sleep(1.5)
@@ -358,6 +403,34 @@ def select_account(target: str, *, attempts: int = 8) -> str:
     raise HsrError(f"selected_account_mismatch_after_{attempts}_attempts")
 
 
+def boot_into_game() -> str:
+    """Walk from the launcher / title screen into the game; return the in-game UID.
+
+    Shared by `switch` (after the target account is selected) and `current`
+    (which has to get in-game to see who is logged in — the launcher never
+    shows the account).
+    """
+    wait_until(lambda im: is_launcher(im) or is_title(im), 120, "launcher")
+    # The "点击进入" strip renders slightly after the launcher rail. Give it a
+    # moment; if it never appears this is the "开始游戏" launcher form instead.
+    try:
+        wait_until(is_title, 30, "title_strip")
+    except HsrError:
+        # "开始游戏" form: tapping it boots the session and usually lands on a
+        # "点击进入" form that needs one more tap before the game really starts.
+        tap((640, 512))
+        try:
+            wait_until(is_title, 60, "title_strip_after_start")
+        except HsrError:
+            pass
+        else:
+            tap((640, 665))
+    else:
+        tap((640, 665))
+    uid, _ = wait_until(uid_of, 240, "in_game_uid")
+    return uid
+
+
 def switch(target: str, expected_uid: str | None = None) -> dict[str, Any]:
     # The login modal and its account list render asynchronously and can briefly
     # not be ready (empty selected read / account_loaded timeout). Retry the whole
@@ -379,26 +452,8 @@ def switch(target: str, expected_uid: str | None = None) -> dict[str, Any]:
     assert selected is not None
     img = capture("before-login")
     rows = ocr_rows(img, REGION["modal_marker"])
-    enter = tap_point(rows, "进入游戏", (640, 434))
-    tap(enter)
-    _, img = wait_until(lambda im: is_launcher(im) or is_title(im), 120, "launcher")
-    # The "点击进入" strip renders slightly after the launcher rail. Give it a
-    # moment; if it never appears this is the "开始游戏" launcher form instead.
-    try:
-        _, img = wait_until(is_title, 30, "title_strip")
-    except HsrError:
-        # "开始游戏" form: tapping it boots the session and usually lands on a
-        # "点击进入" form that needs one more tap before the game really starts.
-        tap((640, 512))
-        try:
-            _, img = wait_until(is_title, 60, "title_strip_after_start")
-        except HsrError:
-            pass
-        else:
-            tap((640, 665))
-    else:
-        tap((640, 665))
-    uid, img = wait_until(uid_of, 240, "in_game_uid")
+    tap(tap_point(rows, "进入游戏", (640, 434)))
+    uid = boot_into_game()
     result = {
         "ok": expected_uid is None or uid == expected_uid,
         "target": target,
@@ -459,39 +514,42 @@ def ensure_hsr_foreground() -> None:
     raise HsrError("focus_not_hsr_after_start")
 
 
-def current(accounts: dict[str, str | None]) -> dict[str, Any]:
+def current(accounts: dict[str, str | None], *, timeout: float = 300,
+            enter: bool = True) -> dict[str, Any]:
     """Detect which account is logged in on the current HSR instance.
 
     Matches by in-game UID first (most reliable), then by the masked account
-    selected on the login modal. Returns the matched masked account plus state.
+    selected on the login modal. The launcher never shows the account, so when
+    the app has just been (re)started this walks into the game to read the UID —
+    that is the only identity visible without logging out first.
     """
     ensure_hsr_foreground()
-    img = capture("current")
+    state_name, img, uid = wait_known_state(timeout)
+    note = ""
+    if enter and uid is None and state_name in ("title", "launcher"):
+        try:
+            uid = boot_into_game()
+        except HsrError as exc:
+            note = f"enter_game_failed: {exc}"
+        else:
+            state_name = "ingame"
+    # Only pay for the masked-row OCR when the UID did not answer the question.
+    # `img` is the frame the state was classified from; re-capturing here would
+    # race with the game's own transitions (the UID read right after booting is
+    # the trustworthy one, so `boot_into_game` hands it back instead).
+    selected = None if uid else read_digits(img, REGION["selected"])
+    matched, via = match_account(accounts, uid=uid, selected=selected)
     state = {
-        "title": is_title(img),
-        "confirm": is_confirm(img),
-        "modal": is_modal(img),
-        "launcher": is_launcher(img),
-        "uid": uid_of(img),
-        "selected_digits": read_digits(img, REGION["selected"]),
+        "state": state_name,
+        "title": state_name == "title",
+        "confirm": state_name == "confirm",
+        "modal": state_name == "modal",
+        "launcher": state_name == "launcher",
+        "uid": uid,
+        "selected_digits": selected,
     }
-    matched: str | None = None
-    via = "none"
-    uid = state["uid"]
-    if uid:
-        for masked, account_uid in accounts.items():
-            if account_uid and uid == account_uid:
-                matched, via = masked, "uid"
-                break
-        if matched is None:
-            via = "uid_unknown"
-    else:
-        selected = state["selected_digits"]
-        if selected:
-            for masked in accounts:
-                if account_matches(masked, selected):
-                    matched, via = masked, "selected"
-                    break
+    if note:
+        state["note"] = note
     return {**state, "ok": True, "matched": matched, "via": via}
 
 
@@ -558,6 +616,10 @@ def main() -> int:
     ap.add_argument("target", nargs="?", help="account name (e.g. main) or masked identity")
     ap.add_argument("--uid", help="expected in-game UID (overrides accounts.yaml)")
     ap.add_argument("--accounts", help="masked=uid,masked=uid inline spec (legacy)")
+    ap.add_argument("--no-enter", action="store_true",
+                    help="current: only read the screen, never tap into the game")
+    ap.add_argument("--timeout", type=float, default=None,
+                    help="current: seconds to wait for a readable screen (default 300)")
     ap.add_argument("--config", default=None, help="path to accounts.yaml (default: beside this script)")
     args = ap.parse_args()
     if args.cmd == "switch" and not args.target:
@@ -579,7 +641,10 @@ def main() -> int:
                 spec = parse_accounts(args.accounts)
             else:
                 spec = {account_masked(a): account_uid(a) for a in accounts}
-            out = current(spec)
+            kwargs: dict[str, Any] = {"enter": not args.no_enter}
+            if args.timeout:
+                kwargs["timeout"] = args.timeout
+            out = current(spec, **kwargs)
             if out.get("matched"):
                 for a in accounts:
                     if account_masked(a) == out["matched"]:

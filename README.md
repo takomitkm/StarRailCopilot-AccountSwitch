@@ -44,6 +44,25 @@ StarRailCopilot 官方**明确不接受**账号切换功能：
 | `hsr_account.py` | 底层：ADB/OCR 识别当前账号、按掩码切换账号（`switch`/`current`/`probe`/`verify-save`） |
 | `requirements.txt` | 依赖：`pyyaml` |
 
+## 前置条件：先让 src 的 WebUI（gui.py）跑起来
+
+src 的**配置与进程都由它的 WebUI 管理**，`gui.py` 就是那个 WebUI：
+
+- 本机部署里它是一个常驻的 systemd user 服务 `starrailcopilot.service`
+  （`python gui.py -p 22367`），**开机自启、一直不停**，不是跑完就退的脚本。
+- 每个「配置」= 一个 Alas 实例名（`config/<name>.json`）+ 对应入口脚本
+  （`src.py` / `paimon.py`），配置内容在 WebUI 里改。
+- **所以顺序是：先确认 WebUI 在跑 → 再启动配置才有意义。** WebUI 没起来时
+  改不了配置、也看不到运行状态，直接拉进程只是拿旧配置空跑。
+
+```bash
+systemctl --user status starrailcopilot.service      # 应显示 active (running)
+systemctl --user start  starrailcopilot.service      # 没跑就起来
+```
+
+本工具**不启动也不替代** WebUI：轮换时它直接 `python <src_profile>.py` 拉起对应配置的进程，
+跑完再杀掉，配置本身仍在 WebUI 里维护。
+
 ## 快速开始（在目标机，如 Debian 12/13）
 
 ```bash
@@ -89,14 +108,21 @@ python3 rotate.py
 | `phone_prefix` | 手机号前 3 位 |
 | `phone_suffix` | 手机号后 2 位（`init.py` 按唯一前缀智能补） |
 | `uid` | 游戏内 UID（`init.py` 自动识别填充） |
-| `src_profile` | src 使用的配置档案（src 的 `config/<profile>`） |
+| `src_profile` | src 使用的配置档案：Alas 实例名，即 `config/<name>.json` 与 `<name>.py` 入口（如 `src` / `paimon`） |
 
 ## 轮换逻辑（rotate.py）
 
-1. 读 `accounts.yaml`，取当前账号（游戏内 UID / 登录页选中掩码识别）。
-2. 从当前账号开始，按列表顺序每个账号跑一轮：关 app → 启动 `src` 档案进程 →
+1. 读 `accounts.yaml`。
+2. **先确认现在是谁的号**：把游戏拉到前台（没开就 `am start`），然后**等到画面进入可识别状态**
+   —— 登录页上选中的脱敏号，或游戏内左下角的 `UID:xxx`。如果停在「点击进入 / 开始游戏」启动页，
+   启动页本身不显示账号，就**点进游戏读 UID**（这是不登出的前提下唯一能看到账号的地方）。
+   识别不出来时记一条日志，退回第一个账号继续。
+3. 从识别到的账号开始，按列表顺序每个账号跑一轮：关 app → 启动该账号 `src_profile` 对应的进程 →
    监控日志（`Request human takeover` / `Close game during wait` 标记、无更新、进程退出）→ 杀进程。
-3. 每账号结束 `switch` 到下一账号；全部跑完退出（timer 次日再触发）。
+4. 每账号结束 `switch` 到下一账号（登出 → 选号 → 进游戏 → 校验 UID）；全部跑完退出（timer 次日再触发）。
+
+> 识别若需要点进游戏，会多一次游戏加载（约 1–2 分钟）；停在登录页时则无需进入即可识别。
+> 只想看当前画面状态、不点进游戏：`python3 hsr_account.py current --no-enter`。
 
 systemd（user）由 `init.py` 生成：`starrail-rotate.timer` 每天触发
 `starrail-rotate.service`（oneshot，`TimeoutStartSec=240min`）。触发时间取

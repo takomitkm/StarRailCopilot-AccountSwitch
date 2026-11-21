@@ -79,7 +79,10 @@ def hsr_cmd(*args: str, timeout: int = 600) -> dict:
 
 
 def current_account() -> tuple[str | None, dict]:
-    out = hsr_cmd("current", timeout=420)
+    # Identifying the account can include booting the game to read the in-game
+    # UID (a freshly started app shows nothing identifiable), so allow well past
+    # the old single-capture budget.
+    out = hsr_cmd("current", timeout=900)
     if not out.get("ok"):
         log(f"current failed: {out.get('error')}")
         return None, {}
@@ -190,10 +193,12 @@ def main() -> int:
     log("=== starrail-rotate start ===")
     matched, detail = current_account()
     log(f"current account: matched={matched} via={detail.get('via')} "
-        f"uid={detail.get('uid')} selected={detail.get('selected_digits')}")
+        f"state={detail.get('state')} uid={detail.get('uid')} "
+        f"selected={detail.get('selected_digits')}"
+        + (f" note={detail['note']}" if detail.get("note") else ""))
     names = [a["name"] for a in accounts]
     if not matched:
-        log("unknown current account -> default to first account")
+        log("cannot identify current account -> default to first account")
         start_idx = 0
     elif matched in names:
         start_idx = names.index(matched)
