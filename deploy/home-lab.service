@@ -1,0 +1,29 @@
+# systemd user unit: boot umbrella on 102, as deployed.
+#
+# Reference copy only - this unit is the user's own home-lab switch (wiki102,
+# swaynag-kill, maa-daily) and is NOT generated or required by this repo.
+# starrailcopilot.service carries PartOf=home-lab.service to ride it; on a
+# machine without this umbrella, delete that line (init.py emits it too) and
+# simply `systemctl --user enable --now starrailcopilot.service`.
+
+[Unit]
+Description=Home lab on 102: one switch for wiki102 / StarRailCopilot / swaynag-kill / daily timers
+Documentation=file:///home/user/.config/systemd/user/home-lab.service
+# 只 Wants 不 After：伞自己立刻就成功返回，组件在后面各自并行起来。
+# 顺序本来就一直是 undefined（以前是靠 5 个独立的 enable 软链），别在这里绑死。
+# 想看依赖：systemctl --user list-dependencies home-lab.service
+Wants=wiki102.service
+Wants=starrailcopilot.service
+Wants=swaynag-kill.service
+Wants=maa-daily.timer
+
+[Service]
+# 伞自己什么都不做，只负责把上面这些拉起来。
+# "停/重启伞会带着组件一起动"这件事靠的是各组件 unit 里的 PartOf=home-lab.service，
+# 已由 install-umbrella.sh 写进那 7 个文件。
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/true
+
+[Install]
+WantedBy=default.target

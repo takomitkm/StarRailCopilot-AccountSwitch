@@ -12,9 +12,12 @@
   5. 生成 systemd user service + timer（starrail-rotate.{service,timer}）。
   6. 安装依赖（pyyaml）。
   7. 默认启用 timer（--no-enable 跳过）。
+  8. 生成 src 的 WebUI service（starrailcopilot.service）：
+       rotate 假定 gui.py 常驻（配置都在 WebUI 里），没有它换号流程无法改配置。
+       默认只在单元不存在时写入 --install-webui-service 才强制覆盖。
 
 用法：
-    python3 init.py [--no-enable] [--no-fill]
+    python3 init.py [--no-enable] [--no-fill] [--install-webui-service]
 """
 from __future__ import annotations
 
@@ -162,6 +165,59 @@ WantedBy=timers.target
     return unit_dir
 
 
+WEBUI_PORT = 22367
+
+
+def webui_service(cfg: dict) -> str:
+    # Mirror of the unit running on 102 (same fields, paths from accounts.yaml):
+    # gui.py is src's web UI; it must stay up because every config/Alas instance
+    # lives in it and the rotation only launches <profile>.py against it.
+    src_dir = str(Path((cfg.get("global") or {}).get("src_dir") or
+                       "/home/user/Desktop/StarRailCopilot").resolve())
+    venv_py = str((cfg.get("global") or {}).get("venv_python") or ".venv/bin/python")
+    vp = Path(venv_py) if Path(venv_py).is_absolute() else (Path(src_dir) / venv_py)
+    gui_log = f"{src_dir}/gui.log"
+    return f"""\
+[Unit]
+Description=StarRailCopilot web UI (Alas launcher)
+Documentation=file://{src_dir}/gui.py
+After=network.target
+PartOf=home-lab.service
+
+[Service]
+Type=simple
+WorkingDirectory={src_dir}
+Environment=PATH={vp.parent}:/usr/local/bin:/usr/bin:/bin
+Environment=LANG=C.UTF-8
+Environment=LC_ALL=C.UTF-8
+Environment=PYTHONUNBUFFERED=1
+ExecStart={vp} gui.py -p {WEBUI_PORT}
+Restart=on-failure
+RestartSec=15
+# gui.py respawns itself when it reloads; do not fight it
+KillMode=mixed
+TimeoutStopSec=20
+StandardOutput=append:{gui_log}
+StandardError=append:{gui_log}
+
+[Install]
+WantedBy=default.target
+"""
+
+
+def write_webui_service(cfg: dict, force: bool) -> None:
+    unit_dir = Path.home() / ".config" / "systemd" / "user"
+    unit_dir.mkdir(parents=True, exist_ok=True)
+    target = unit_dir / "starrailcopilot.service"
+    if target.exists() and not force:
+        print(f"[init] {target} already exists - keep it (use --install-webui-service to overwrite)")
+        return
+    target.write_text(webui_service(cfg), encoding="utf-8")
+    run(["systemctl", "--user", "daemon-reload"])
+    run(["systemctl", "--user", "enable", "--now", "starrailcopilot.service"])
+    print(f"[init] wrote+enabled {target} (src web UI, port {WEBUI_PORT})")
+
+
 def enable_timer() -> None:
     run(["systemctl", "--user", "daemon-reload"])
     run(["systemctl", "--user", "enable", "--now", "starrail-rotate.timer"])
@@ -172,6 +228,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--no-enable", action="store_true", help="do not enable systemd timer")
     ap.add_argument("--no-fill", action="store_true", help="skip device smart-fill (deps+systemd only)")
+    ap.add_argument("--install-webui-service", action="store_true",
+                    help="write/overwrite starrailcopilot.service (src web UI unit)")
     args = ap.parse_args()
 
     print("[init] checking tools...")
@@ -192,6 +250,7 @@ def main() -> int:
             print(f"[init] saved {CFG}")
 
     write_systemd(len(accounts), cfg)
+    write_webui_service(cfg, args.install_webui_service)
     if not args.no_enable:
         enable_timer()
 

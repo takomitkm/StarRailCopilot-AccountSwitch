@@ -1,0 +1,15 @@
+# systemd user unit: daily rotation trigger, as deployed on 102 (Debian).
+#
+# Reference copy: init.py regenerates this from accounts.yaml every run
+# (OnCalendar from global.timer_time, default 04:00).
+
+[Unit]
+Description=StarRailCopilot rotation timer
+
+[Timer]
+OnCalendar=*-*-* 04:00:00
+Persistent=false
+RandomizedDelaySec=0
+
+[Install]
+WantedBy=timers.target

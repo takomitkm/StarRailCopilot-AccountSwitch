@@ -42,6 +42,7 @@ StarRailCopilot 官方**明确不接受**账号切换功能：
 | `init.py` | 初始化：建配置 → 逐账号智能填 `uid`/手机号后缀 → 回写 YAML → 生成 systemd service/timer → 装依赖 |
 | `rotate.py` | 轮换主程序：读 YAML → 逐账号启动 src → 监控到结束 → 切下一账号 → 一轮跑完退出 |
 | `hsr_account.py` | 底层：ADB/OCR 识别当前账号、按掩码切换账号（`switch`/`current`/`probe`/`verify-save`） |
+| `deploy/` | 102 实机部署的 systemd user 单元参考副本（含 src 的 WebUI 服务） |
 | `requirements.txt` | 依赖：`pyyaml` |
 
 ## 前置条件：先让 src 的 WebUI（gui.py）跑起来
@@ -59,6 +60,18 @@ src 的**配置与进程都由它的 WebUI 管理**，`gui.py` 就是那个 WebU
 systemctl --user status starrailcopilot.service      # 应显示 active (running)
 systemctl --user start  starrailcopilot.service      # 没跑就起来
 ```
+
+**新机器还原这套部署**：`init.py` 会从 `accounts.yaml` 生成同款单元 —— rotate 的
+`starrail-rotate.{service,timer}` 每次运行都写；src 的 WebUI 服务 `starrailcopilot.service`
+用 `python3 init.py --install-webui-service` 写入并 enable --now（已存在时不覆盖，加该参数才强制覆盖）。
+`deploy/` 下是 102 实机的参考副本，可人工比对或直接拷贝：
+
+| 单元 | 作用 | 生成方式 |
+|---|---|---|
+| `deploy/starrailcopilot.service` | src WebUI 常驻服务（`gui.py -p 22367`，开机自启） | `init.py --install-webui-service` |
+| `deploy/starrail-rotate.service` | 每日轮换 oneshot（跑 `rotate.py`） | `init.py` 每次运行 |
+| `deploy/starrail-rotate.timer` | 每天 `global.timer_time` 触发 | `init.py` 每次运行 |
+| `deploy/home-lab.service` | 102 的开机伞（本机自有，非本 repo 生成；`starrailcopilot.service` 里 `PartOf=` 挂它） | 仅参考，新机器可删掉 `PartOf=` 行 |
 
 本工具**不启动也不替代** WebUI：轮换时它直接 `python <src_profile>.py` 拉起对应配置的进程，
 跑完再杀掉，配置本身仍在 WebUI 里维护。
@@ -80,6 +93,9 @@ python3 init.py
 
 # 3. 手动跑一轮试试（不等 timer）
 python3 rotate.py
+
+# （可选）新机器还原 src 的 WebUI 常驻服务（已在则跳过，--install-webui-service 强制覆盖）
+python3 init.py --install-webui-service
 ```
 
 `accounts.yaml` 包含真实手机号/UID，**已被 `.gitignore` 排除，绝不提交**；

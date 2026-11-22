@@ -1,0 +1,18 @@
+# systemd user unit: daily account rotation, as deployed on 102 (Debian).
+#
+# Reference copy: init.py regenerates this from accounts.yaml every run
+# (account count, python path, config path, OnCalendar from global.timer_time).
+
+[Unit]
+Description=StarRailCopilot account rotation (daily, 2 accounts)
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /home/user/StarRailCopilot-AccountSwitch/rotate.py --config /home/user/StarRailCopilot-AccountSwitch/accounts.yaml
+TimeoutStartSec=240min
+Nice=10
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target
